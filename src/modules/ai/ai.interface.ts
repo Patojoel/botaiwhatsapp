@@ -1,9 +1,9 @@
 export interface AIMessage {
   role: "system" | "user" | "assistant";
-  content: string | AIMultimodalContent[];
+  content: string | AIChatMessageContent[];
 }
 
-export type AIMultimodalContent = 
+export type AIChatMessageContent = 
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
 

@@ -14,6 +14,9 @@ import {
 } from "lucide-react";
 
 export type BotInstanceWithCounts = BotInstance & {
+  statusMediaUrl?: string | null;
+  statusMediaType?: string | null;
+  statusSchedule?: string | null;
   _count: {
     contacts: number;
     messages: number;
@@ -31,12 +34,14 @@ interface DashboardClientProps {
     messagesCount: number;
   };
   instances: BotInstanceWithCounts[];
+  systemPrompts: any[];
 }
 
 export default function DashboardClient({
   users,
   stats,
   instances,
+  systemPrompts,
 }: DashboardClientProps) {
   const [selectedInstance, setSelectedInstance] =
     useState<BotInstanceWithCounts | null>(instances[0] || null);
@@ -45,6 +50,7 @@ export default function DashboardClient({
   const [selectedContact, setSelectedContact] =
     useState<ContactWithMessages | null>(null);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -67,6 +73,7 @@ export default function DashboardClient({
   useEffect(() => {
     if (!selectedInstance) return;
     setSystemPrompt(selectedInstance.systemPrompt || "");
+    setActivePromptId((selectedInstance as any).activePromptId || null);
 
     const eventSource = new EventSource(
       `/api/status/stream?instanceId=${selectedInstance.id}`,
@@ -121,10 +128,10 @@ export default function DashboardClient({
     try {
       await fetch(`/api/instance/${selectedInstance.id}/prompt`, {
         method: "PATCH",
-        body: JSON.stringify({ systemPrompt }),
+        body: JSON.stringify({ systemPrompt, activePromptId }),
         headers: { "Content-Type": "application/json" },
       });
-      alert("Prompt sauvegardé avec succès !");
+      alert("Configuration sauvegardée avec succès !");
     } catch (error) {
       alert("Erreur lors de la sauvegarde du prompt.");
     } finally {
@@ -200,7 +207,7 @@ export default function DashboardClient({
                    <User size={24} />
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="font-bold text-sm dark:text-white truncate">{user.name || user.pushName || user.phone}</p>
+                  <p className="font-bold text-sm dark:text-white truncate">{user.name || user.phone}</p>
                   <p className="text-xs text-gray-500 truncate">
                     {user.messages[0]?.content || "Pas de message"}
                   </p>
@@ -317,26 +324,53 @@ export default function DashboardClient({
               </div>
            </div>
 
-           <div>
+            <div>
               <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Configuration IA</h3>
               <div className="space-y-4">
-                 <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-2 mb-1 block tracking-wider">System Prompt</label>
-                    <textarea 
-                      value={systemPrompt}
-                      onChange={(e) => setSystemPrompt(e.target.value)}
-                      className="w-full bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl p-4 text-xs outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-40"
-                    />
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-2 block tracking-wider">Contexte IA (Expertise)</label>
+                    <select 
+                      value={activePromptId || ""}
+                      onChange={(e) => setActivePromptId(e.target.value || null)}
+                      className="w-full bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-3 text-xs outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                    >
+                      <option value="">Aucun (Texte libre uniquement)</option>
+                      {systemPrompts.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
                  </div>
+
+                 {!activePromptId && (
+                   <div className="animate-in fade-in slide-in-from-top-2">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase ml-2 mb-1 block tracking-wider">System Prompt (Libre)</label>
+                      <textarea 
+                        value={systemPrompt}
+                        onChange={(e) => setSystemPrompt(e.target.value)}
+                        className="w-full bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl p-4 text-xs outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-40"
+                        placeholder="Ex: Tu es un assistant poli..."
+                      />
+                   </div>
+                 )}
+
+                 {activePromptId && (
+                   <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl animate-in zoom-in-95 duration-300">
+                     <p className="text-[10px] text-indigo-600 font-bold uppercase mb-1">Contexte actif :</p>
+                     <p className="text-xs text-gray-500 italic line-clamp-3">
+                       {systemPrompts.find(p => p.id === activePromptId)?.content}
+                     </p>
+                   </div>
+                 )}
+
                  <button 
                    onClick={handleSavePrompt}
                    disabled={isSavingPrompt}
                    className="w-full py-4 bg-gray-900 dark:bg-indigo-600 text-white rounded-3xl font-bold text-sm shadow-xl hover:scale-[1.02] transition-all"
                  >
-                   {isSavingPrompt ? "Sauvegarde..." : "Enregistrer"}
+                   {isSavingPrompt ? "Sauvegarde..." : "Enregistrer la config"}
                  </button>
               </div>
-           </div>
+            </div>
 
            {qrCode && (
               <div className="bg-indigo-600 p-6 rounded-3xl text-white text-center space-y-4">

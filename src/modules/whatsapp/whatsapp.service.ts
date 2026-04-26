@@ -10,6 +10,7 @@ import { ConversationRepository } from "../conversation/conversation.repository"
 import { aiService } from "../ai/ai.service";
 import pino from "pino";
 import path from "path";
+import fs from "fs/promises";
 import { EventEmitter } from "events";
 import { messageQueue } from "@/lib/queue";
 
@@ -257,10 +258,37 @@ export class WhatsAppService {
     const jids = contacts.map(c => c.phone.includes("@") ? c.phone : `${c.phone}@s.whatsapp.net`);
 
     if (mediaUrl) {
-      await instance.socket.sendMessage("status@broadcast", {
-        [mediaType]: { url: mediaUrl },
-        caption: text,
-      }, { statusJidList: jids });
+      try {
+        let mediaContent: any;
+        
+        if (mediaUrl.startsWith("data:")) {
+          // Si c'est déjà du Base64 (Data URI)
+          mediaContent = { url: mediaUrl };
+        } else if (mediaUrl.startsWith("/uploads/")) {
+          // Résolution absolue pour éviter toute ambiguïté
+          const fileName = mediaUrl.substring(9); // après /uploads/
+          const absolutePath = path.join(process.cwd(), "public", "uploads", fileName);
+          
+          logger.info(`[WhatsApp] Lecture du fichier local: ${absolutePath}`);
+          mediaContent = await fs.readFile(absolutePath);
+        } else {
+          // Si c'est une URL externe (http...)
+          mediaContent = { url: mediaUrl };
+        }
+
+        await instance.socket.sendMessage("status@broadcast", {
+          [mediaType]: mediaContent,
+          caption: text,
+        }, { statusJidList: jids });
+      } catch (err) {
+        logger.error(`[WhatsApp] Erreur média (${mediaUrl.substring(0, 50)}...): ${err}`);
+        // Fallback: envoyer au moins le texte si le média échoue
+        await instance.socket.sendMessage("status@broadcast", { 
+          text,
+          backgroundColor: "#075E54",
+          font: 1
+        }, { statusJidList: jids });
+      }
     } else {
       await instance.socket.sendMessage("status@broadcast", { 
         text,
@@ -268,5 +296,40 @@ export class WhatsAppService {
         font: 1
       }, { statusJidList: jids });
     }
+  }
+
+  static async sendDirectMessage(
+    instanceId: string,
+    phone: string,
+    text: string,
+    mediaUrl?: string,
+    mediaType: "image" | "video" | "none" = "none"
+  ) {
+    const instance = globalForBaileys.whatsappInstances.get(instanceId);
+    if (!instance || instance.status !== "Connected") {
+      throw new Error("Instance non connectée");
+    }
+
+    const jid = phone.includes("@") ? phone : `${phone}@s.whatsapp.net`;
+    const messageOptions: any = {};
+
+    if (mediaUrl && mediaType !== "none") {
+      let mediaContent: any;
+      if (mediaUrl.startsWith("data:")) {
+        mediaContent = { url: mediaUrl };
+      } else if (mediaUrl.startsWith("/uploads/")) {
+        const fileName = mediaUrl.substring(9);
+        const absolutePath = path.join(process.cwd(), "public", "uploads", fileName);
+        mediaContent = await fs.readFile(absolutePath);
+      } else {
+        mediaContent = { url: mediaUrl };
+      }
+      messageOptions[mediaType] = mediaContent;
+      messageOptions.caption = text;
+    } else {
+      messageOptions.text = text;
+    }
+
+    await instance.socket.sendMessage(jid, messageOptions);
   }
 }

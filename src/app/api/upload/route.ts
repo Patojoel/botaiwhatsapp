@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import sharp from "sharp";
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,12 +25,21 @@ export async function POST(req: NextRequest) {
     } catch (err) {}
 
     // Générer un nom de fichier unique
-    const ext = path.extname(file.name);
-    const fileName = `${uuidv4()}${ext}`;
+    const ext = path.extname(file.name).toLowerCase();
+    const isImage = [".jpg", ".jpeg", ".png", ".webp"].includes(ext);
+    const fileName = `${uuidv4()}${isImage ? ".png" : ext}`; // On force le .png pour la compatibilité
     const filePath = path.join(uploadDir, fileName);
 
-    // Écrire le fichier
-    await writeFile(filePath, buffer);
+    if (isImage) {
+      // Compression et conversion en PNG avec Sharp
+      const compressedBuffer = await sharp(buffer)
+        .resize({ width: 800, withoutEnlargement: true }) // 800px est encore plus léger et suffit à l'IA
+        .png({ quality: 70, compressionLevel: 9 }) // Qualité un peu réduite pour le poids
+        .toBuffer();
+      await writeFile(filePath, compressedBuffer);
+    } else {
+      await writeFile(filePath, buffer);
+    }
 
     // Retourner l'URL publique
     const url = `/uploads/${fileName}`;

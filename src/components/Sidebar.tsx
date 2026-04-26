@@ -5,17 +5,27 @@ import {
   LayoutDashboard, 
   MessageSquare, 
   Zap, 
+  Users, 
+  Smartphone, 
   Settings, 
-  LogOut,
+  LogOut, 
+  Megaphone,
+  Package,
+  BrainCircuit,
   Bot
-} from "lucide-react";
+} from 'lucide-react';
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
+  { icon: Package, label: "Catalogue Produits", href: "/dashboard/products" },
+  { icon: BrainCircuit, label: "Prompts IA", href: "/dashboard/prompts" },
   { icon: MessageSquare, label: "Conversations", href: "/dashboard/chat" },
   { icon: Zap, label: "Automatisations", href: "/dashboard/automations" },
+  { icon: Megaphone, label: "Diffusions", href: "/dashboard/broadcasts" },
+  { icon: Users, label: "Contacts", href: "/dashboard/contacts" },
+  { icon: Smartphone, label: "Instances", href: "/dashboard/instances" },
   { icon: Settings, label: "Paramètres", href: "/dashboard/settings" },
 ];
 

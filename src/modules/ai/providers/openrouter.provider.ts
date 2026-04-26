@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { IAIProvider, AIMessage } from "../ai.interface";
 
 export class OpenRouterProvider implements IAIProvider {
@@ -6,9 +7,7 @@ export class OpenRouterProvider implements IAIProvider {
 
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY || "";
-    // On conserve le fallback vers la version openrouter recommandée
-    this.model =
-      process.env.OPENROUTER_MODEL || "meta-llama/llama-3.2-3b-instruct:free";
+    this.model = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
   }
 
   async generateResponse(
@@ -27,27 +26,25 @@ export class OpenRouterProvider implements IAIProvider {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer":
-            process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-          "X-Title": "WhatsApp AI Bot",
+          "HTTP-Referer": "http://localhost:3000",
+          "X-Title": "WhatsApp Bot",
         },
         body: JSON.stringify({
           model: this.model,
           messages: messages,
-          max_tokens: 500,
+          max_tokens: 1000,
         }),
-        signal: AbortSignal.timeout(60000), // Augmenté à 60s pour la vision
       },
     );
 
     if (!response.ok) {
       const text = await response.text();
+      logger.error({ status: response.status, error: text }, "[OpenRouter] API Error");
       throw new Error(`OpenRouter error: ${response.status} ${text}`);
     }
 
     const data = await response.json();
-    const reply =
-      data.choices?.[0]?.message?.content || "Désolé, je n'ai pas de réponse.";
+    const reply = data.choices?.[0]?.message?.content || "Désolé, je n'ai pas de réponse.";
 
     return {
       reply,

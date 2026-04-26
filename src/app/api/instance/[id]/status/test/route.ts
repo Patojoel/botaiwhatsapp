@@ -31,12 +31,15 @@ export async function POST(
       try {
         const fileName = mediaUrl.split("/uploads/")[1];
         const filePath = path.join(process.cwd(), "public", "uploads", fileName);
+        console.log(`[TestRoute] Lecture du fichier: ${filePath}`);
+        
         const fileBuffer = await fs.readFile(filePath);
         const base64Image = fileBuffer.toString("base64");
-        const mimeType = fileName.endsWith(".png") ? "image/png" : "image/jpeg";
+        const ext = path.extname(fileName).toLowerCase().replace(".", "");
+        const mimeType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
         aiMediaUrl = `data:${mimeType};base64,${base64Image}`;
       } catch (err) {
-        console.error("Failed to read local file for AI:", err);
+        console.error(`[TestRoute] Erreur lecture fichier (${mediaUrl}):`, err);
       }
     }
 
@@ -54,7 +57,7 @@ export async function POST(
       aiMediaUrl && mediaType === "image" ? aiMediaUrl : undefined
     );
 
-    await WhatsAppService.sendStatusUpdate(instanceId, statusText, mediaUrl, mediaType);
+    await WhatsAppService.sendStatusUpdate(instanceId, statusText, aiMediaUrl, mediaType);
 
     return NextResponse.json({ 
       success: true, 

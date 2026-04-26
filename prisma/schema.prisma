@@ -35,21 +35,23 @@ model Session {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model User { // SaaS User (Owner)
+model User {
   id            String    @id @default(cuid())
   name          String?
   email         String?   @unique
   emailVerified DateTime?
   image         String?
-  password      String?   // For credentials
+  password      String? // For credentials
   role          UserRole  @default(USER)
-  
+
   accounts      Account[]
   sessions      Session[]
-  instances     BotInstance[]
+  botInstances  BotInstance[]
+  products      Product[]
+  systemPrompts SystemPrompt[]
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum UserRole {
@@ -67,45 +69,116 @@ model VerificationToken {
 
 // WhatsApp Models
 model BotInstance {
-  id           String      @id @default(cuid())
-  name         String
-  phone        String?     
-  sessionId    String      @unique
-  status         BotStatus   @default(DISCONNECTED)
-  systemPrompt   String      @default("Tu es un assistant commercial intelligent, court et concis pour WhatsApp.")
-  statusMediaUrl String?     @db.Text
-  statusMediaType String      @default("image") // "image" ou "video"
-  
-  ownerId      String
-  owner        User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  
-  contacts     Contact[]
-  messages     Message[]
-  sessions     WhatsappSession[]
-  promptHistory PromptHistory[]
-  
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id              String    @id @default(cuid())
+  name            String
+  phone           String?
+  sessionId       String    @unique
+  status          BotStatus @default(DISCONNECTED)
+  systemPrompt    String    @default("Tu es un assistant commercial intelligent, court et concis pour WhatsApp.")
+  statusMediaUrl  String?   @db.Text
+  statusMediaType String    @default("image")
+  statusSchedule  String?
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Nouveaux liens
+  activePromptId String?
+  activePrompt   SystemPrompt? @relation("ActivePrompt", fields: [activePromptId], references: [id])
+
+  whatsappSessions WhatsappSession[]
+  contacts         Contact[]
+  messages         Message[]
+  promptHistory    PromptHistory[]
+  statusCampaigns  StatusCampaign[]
+  statusLogs       StatusLog[]
+  broadcasts       BroadcastCampaign[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  description String  @db.Text
+  price       Float?
+  currency    String  @default("XAF")
+  category    String?
+
+  // Médias (URLs JSON ou String séparé)
+  images String[]
+  videos String[]
+
+  // Expertise produit
+  features      String[] // Caractéristiques techniques
+  benefits      String[] // Bénéfices clients
+  predefinedFaq Json? // { q: string, a: string }[]
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Liaisons
+  prompts SystemPrompt[] @relation("ProductPrompts")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SystemPrompt {
+  id      String @id @default(cuid())
+  name    String
+  content String @db.Text
+
+  // Règles strictes
+  rules String[] // ex: ["Ne pas parler de prix sans promo", "Toujours être poli"]
+
+  // Restrictions
+  restrictToProducts Boolean @default(true) // Si vrai, l'IA ne répond que sur ses produits liés
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Liaisons
+  products        Product[]     @relation("ProductPrompts")
+  usedByInstances BotInstance[] @relation("ActivePrompt")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WhatsappSession {
-  id            String      @id @default(cuid())
+  id            String @id @default(cuid())
   botInstanceId String
-  key           String      // e.g. "creds" or "pre-key-1"
-  value         String      @db.Text
-  
-  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+  key           String // e.g. "creds" or "pre-key-1"
+  value         String @db.Text
+
+  botInstance BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
 
   @@unique([botInstanceId, key])
 }
 
 model PromptHistory {
-  id            String      @id @default(cuid())
+  id            String   @id @default(cuid())
   botInstanceId String
-  prompt        String      @db.Text
-  createdAt     DateTime    @default(now())
+  prompt        String   @db.Text
+  createdAt     DateTime @default(now())
 
-  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+  botInstance BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+}
+
+model StatusLog {
+  id            String          @id @default(cuid())
+  botInstanceId String
+  botInstance   BotInstance     @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+  campaignId    String?
+  campaign      StatusCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  text          String          @db.Text
+  mediaUrl      String?
+  mediaType     String
+  status        String          @default("SUCCESS")
+  error         String?         @db.Text
+  createdAt     DateTime        @default(now())
 }
 
 enum BotStatus {
@@ -115,31 +188,93 @@ enum BotStatus {
   CONNECTED
 }
 
-model Contact { // Renamed from User to avoid conflict
-  id            String      @id @default(cuid())
-  phone         String
-  name          String?
-  createdAt     DateTime    @default(now())
-  
+model Contact {
+  id        String   @id @default(cuid())
+  phone     String
+  name      String?
+  createdAt DateTime @default(now())
+
   botInstanceId String
   botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
-  
-  messages      Message[]
+
+  messages   Message[]
+  broadcasts BroadcastRecipient[]
 
   @@unique([phone, botInstanceId])
 }
 
 model Message {
-  id            String      @id @default(cuid())
-  role          Role
-  content       String
-  createdAt     DateTime    @default(now())
-  
-  contactId     String
-  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  
+  id        String   @id @default(cuid())
+  role      Role
+  content   String
+  createdAt DateTime @default(now())
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
   botInstanceId String
   botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+}
+
+model StatusCampaign {
+  id             String   @id @default(cuid())
+  name           String
+  mediaUrl       String?
+  mediaType      String   @default("image")
+  customText     String?  @db.Text
+  useAI          Boolean  @default(true)
+  cronPattern    String   @default("0 9 * * *")
+  scheduleConfig Json? // Nouvelle config modulaire
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  botInstanceId String
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+  statusLogs    StatusLog[]
+}
+
+model BroadcastCampaign {
+  id             String  @id @default(cuid())
+  name           String
+  content        String  @db.Text
+  mediaUrl       String?
+  mediaType      String  @default("none")
+  cronPattern    String?
+  scheduleConfig Json? // Nouvelle config modulaire
+  isActive       Boolean @default(true)
+  status         String  @default("PENDING")
+
+  botInstanceId String
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+
+  recipients BroadcastRecipient[]
+  logs       BroadcastLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BroadcastRecipient {
+  id                  String            @id @default(cuid())
+  broadcastCampaignId String
+  broadcastCampaign   BroadcastCampaign @relation(fields: [broadcastCampaignId], references: [id], onDelete: Cascade)
+
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  status String @default("PENDING")
+}
+
+model BroadcastLog {
+  id                  String            @id @default(cuid())
+  broadcastCampaignId String
+  broadcastCampaign   BroadcastCampaign @relation(fields: [broadcastCampaignId], references: [id], onDelete: Cascade)
+
+  contactPhone String
+  status       String
+  error        String?  @db.Text
+  sentAt       DateTime @default(now())
 }
 
 enum Role {

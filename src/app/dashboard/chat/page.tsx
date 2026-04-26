@@ -18,10 +18,15 @@ export default async function ChatPage() {
   const instances = await prisma.botInstance.findMany({
     where: { ownerId: userId },
     include: {
+      activePrompt: true,
       _count: {
         select: { contacts: true, messages: true },
       },
     },
+  });
+
+  const systemPrompts = await prisma.systemPrompt.findMany({
+    where: { ownerId: userId },
   });
 
   const totalMessages = await prisma.message.count({
@@ -57,6 +62,7 @@ export default async function ChatPage() {
       users={contacts}
       stats={stats}
       instances={instances as any}
+      systemPrompts={systemPrompts as any}
     />
   );
 }

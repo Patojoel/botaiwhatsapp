@@ -1,8 +1,21 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { BotInstanceWithCounts } from "../DashboardClient";
-import { Image, Video, Send, Sparkles, Save, Info } from "lucide-react";
+import { 
+  Image as ImageIcon, 
+  Video, 
+  Send, 
+  Sparkles, 
+  Save, 
+  Info, 
+  Loader2, 
+  Upload, 
+  X,
+  Clock,
+  Calendar,
+  CheckCircle2
+} from "lucide-react";
 
 interface AutomationsClientProps {
   instances: BotInstanceWithCounts[];
@@ -17,9 +30,25 @@ export default function AutomationsClient({ instances }: AutomationsClientProps)
   const [isUploading, setIsUploading] = useState(false);
   const [useAI, setUseAI] = useState(true);
   const [scheduleTime, setScheduleTime] = useState("09:00");
-  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]); // 0-6 (Dim-Sam)
+  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]);
 
   const selectedInstance = instances.find(i => i.id === selectedInstanceId);
+
+  // Charger les paramètres actuels de l'instance
+  useEffect(() => {
+    if (selectedInstance) {
+      setMediaUrl(selectedInstance.statusMediaUrl || "");
+      setMediaType(selectedInstance.statusMediaType as any || "image");
+      
+      if (selectedInstance.statusSchedule) {
+        const parts = selectedInstance.statusSchedule.split(" ");
+        if (parts.length >= 5) {
+            setScheduleTime(`${parts[1].padStart(2, '0')}:${parts[0].padStart(2, '0')}`);
+            setSelectedDays(parts[4].split(",").map(Number));
+        }
+      }
+    }
+  }, [selectedInstanceId]);
 
   const handlePostStatus = async () => {
     if (!selectedInstanceId) return;
@@ -30,9 +59,6 @@ export default function AutomationsClient({ instances }: AutomationsClientProps)
         body: JSON.stringify({
           mediaUrl: mediaUrl || undefined,
           mediaType,
-          // Si useAI est faux, on pourrait passer le statusText manuel
-          // Mais notre route actuelle génère toujours via l'IA.
-          // Je vais adapter la route après.
           customText: useAI ? undefined : statusText,
         }),
       });
@@ -64,14 +90,8 @@ export default function AutomationsClient({ instances }: AutomationsClientProps)
       });
       const data = await res.json();
       if (data.url) {
-        const absoluteUrl = `${window.location.origin}${data.url}`;
-        setMediaUrl(absoluteUrl);
-        
-        if (file.type.startsWith("video")) {
-          setMediaType("video");
-        } else {
-          setMediaType("image");
-        }
+        setMediaUrl(data.url);
+        setMediaType(file.type.startsWith("video") ? "video" : "image");
       }
     } catch (err) {
       alert("Erreur lors de l'upload");
@@ -81,12 +101,11 @@ export default function AutomationsClient({ instances }: AutomationsClientProps)
   };
 
   const handleSaveSettings = async () => {
-    // Conversion jours + heure en Cron : "min hour * * days"
     const [hour, minute] = scheduleTime.split(":");
     const cron = `${minute} ${hour} * * ${selectedDays.join(",")}`;
 
     try {
-      await fetch(`/api/instance/${selectedInstanceId}/prompt`, {
+      const res = await fetch(`/api/instance/${selectedInstanceId}/prompt`, {
         method: "PATCH",
         body: JSON.stringify({ 
             statusMediaUrl: mediaUrl,
@@ -95,214 +114,207 @@ export default function AutomationsClient({ instances }: AutomationsClientProps)
         }),
         headers: { "Content-Type": "application/json" },
       });
-      alert("Programmation mise à jour ! Vos statuts seront lancés à " + scheduleTime + " les jours sélectionnés.");
+      if (res.ok) {
+        alert("Programmation mise à jour !");
+      }
     } catch (err) {
       alert("Erreur lors de la sauvegarde");
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <header>
-        <h1 className="text-3xl font-black tracking-tight dark:text-white">Automatisations</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-2">Gérez vos statuts automatiques et vos publications programmées.</p>
+    <div className="max-w-6xl mx-auto space-y-8 pb-20">
+      <header className="flex justify-between items-end">
+        <div>
+          <h1 className="text-4xl font-black tracking-tighter dark:text-white italic uppercase">Automatisations</h1>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">Configurez vos publications automatiques et testez vos contenus.</p>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Colonne de gauche : Configuration */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 shadow-sm border border-gray-100 dark:border-gray-800">
-            <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <Send className="text-indigo-600" size={24} />
-              Publier un Statut
-            </h2>
-
-            <div className="space-y-6">
-              {/* Choix de l'instance */}
-              <div>
-                <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Instance WhatsApp</label>
-                <select 
-                  value={selectedInstanceId}
-                  onChange={(e) => setSelectedInstanceId(e.target.value)}
-                  className="w-full bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                >
-                  {instances.map(inst => (
-                    <option key={inst.id} value={inst.id}>{inst.name} ({inst.phone || "Non connecté"})</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Toggle IA vs Manuel */}
-              <div className="flex bg-gray-100 dark:bg-black p-1 rounded-xl">
-                <button 
-                  onClick={() => setUseAI(true)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${useAI ? "bg-white dark:bg-gray-800 shadow-sm text-indigo-600" : "text-gray-500"}`}
-                >
-                  <Sparkles size={16} /> Généré par IA
-                </button>
-                <button 
-                  onClick={() => setUseAI(false)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${!useAI ? "bg-white dark:bg-gray-800 shadow-sm text-indigo-600" : "text-gray-500"}`}
-                >
-                  Manuel
-                </button>
-              </div>
-
-              {!useAI && (
-                <div>
-                  <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Message du statut</label>
-                  <textarea 
-                    value={statusText}
-                    onChange={(e) => setStatusText(e.target.value)}
-                    placeholder="Quoi de neuf ?"
-                    className="w-full bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-32"
-                  />
+        {/* Colonne Principale */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          {/* Section Publication Rapide */}
+          <section className="bg-white dark:bg-gray-900 rounded-[40px] p-10 shadow-sm border border-gray-100 dark:border-gray-800 relative overflow-hidden">
+             <div className="absolute top-0 right-0 p-8 opacity-5">
+                <Send size={120} />
+             </div>
+             
+             <h2 className="text-2xl font-black mb-8 flex items-center gap-3 italic uppercase tracking-tight">
+                <div className="p-2 bg-indigo-600 rounded-xl text-white">
+                  <Send size={20} />
                 </div>
-              )}
+                Publication Directe
+             </h2>
 
-              {/* Média */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Type de média</label>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => setMediaType("image")}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 border rounded-xl transition-all ${mediaType === "image" ? "border-indigo-600 bg-indigo-50 dark:bg-indigo-900/10 text-indigo-600" : "border-gray-200 dark:border-gray-800 text-gray-500"}`}
-                    >
-                      <Image size={18} /> Image
-                    </button>
-                    <button 
-                      onClick={() => setMediaType("video")}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 border rounded-xl transition-all ${mediaType === "video" ? "border-indigo-600 bg-indigo-50 dark:bg-indigo-900/10 text-indigo-600" : "border-gray-200 dark:border-gray-800 text-gray-500"}`}
-                    >
-                      <Video size={18} /> Vidéo
-                    </button>
+             <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                   <div>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Instance WhatsApp</label>
+                      <select 
+                        value={selectedInstanceId}
+                        onChange={(e) => setSelectedInstanceId(e.target.value)}
+                        className="w-full bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-bold"
+                      >
+                        {instances.map(inst => (
+                          <option key={inst.id} value={inst.id}>{inst.name} ({inst.phone || "Déconnecté"})</option>
+                        ))}
+                      </select>
+                   </div>
+                   <div>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Mode de contenu</label>
+                      <div className="flex bg-gray-100 dark:bg-black p-1.5 rounded-2xl">
+                        <button 
+                          onClick={() => setUseAI(true)}
+                          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black uppercase transition-all ${useAI ? "bg-white dark:bg-gray-800 shadow-lg text-indigo-600" : "text-gray-400"}`}
+                        >
+                          <Sparkles size={16} /> IA
+                        </button>
+                        <button 
+                          onClick={() => setUseAI(false)}
+                          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black uppercase transition-all ${!useAI ? "bg-white dark:bg-gray-800 shadow-lg text-indigo-600" : "text-gray-400"}`}
+                        >
+                          Manuel
+                        </button>
+                      </div>
+                   </div>
+                </div>
+
+                {!useAI && (
+                  <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Légende personnalisée</label>
+                    <textarea 
+                      value={statusText}
+                      onChange={(e) => setStatusText(e.target.value)}
+                      placeholder="Quoi de neuf aujourd'hui ?"
+                      className="w-full bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-[32px] px-8 py-6 outline-none focus:ring-2 focus:ring-indigo-500 transition-all h-40 text-lg italic"
+                    />
                   </div>
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Source du média</label>
-                  <div className="flex gap-2">
+                )}
+
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Média du statut</label>
+                  <div className="flex gap-4">
                     <input 
-                      type="text"
+                      type="text" 
                       value={mediaUrl}
                       onChange={(e) => setMediaUrl(e.target.value)}
-                      placeholder="https://... ou glissez un fichier"
-                      className="flex-1 bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                      placeholder="URL ou glissez un fichier..."
+                      className="flex-1 bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-2xl px-6 py-4 outline-none"
                     />
-                    <div className="relative">
-                      <input 
-                        type="file" 
-                        id="status-file"
-                        className="hidden" 
-                        accept="image/*,video/*"
-                        onChange={handleFileUpload}
-                      />
-                      <label 
-                        htmlFor="status-file"
-                        className={`flex items-center justify-center p-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-xl cursor-pointer hover:bg-indigo-100 transition-all ${isUploading ? "opacity-50 pointer-events-none" : ""}`}
-                      >
-                        {isUploading ? (
-                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-indigo-600 border-t-transparent" />
-                        ) : (
-                          <Image size={20} />
-                        )}
-                      </label>
-                    </div>
+                    <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black uppercase text-xs flex items-center gap-3 transition-all shadow-lg shadow-indigo-200 dark:shadow-none">
+                      {isUploading ? <Loader2 className="animate-spin" size={20} /> : <Upload size={20} />}
+                      <span>Upload</span>
+                      <input type="file" className="hidden" onChange={handleFileUpload} accept="image/*,video/*" />
+                    </label>
                   </div>
-                </div>
-              </div>
 
-              <div className="flex gap-4">
-                <button 
-                  onClick={handlePostStatus}
-                  disabled={isSending}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none transition-all flex items-center justify-center gap-3 disabled:bg-gray-400"
-                >
-                  <Send size={20} />
-                  {isSending ? "Envoi en cours..." : "Publier maintenant"}
-                </button>
-                <button 
-                  onClick={handleSaveSettings}
-                  className="px-6 border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all"
-                  title="Sauvegarder comme média par défaut"
-                >
-                  <Save size={20} />
-                </button>
-              </div>
-            </div>
-          </div>
+                  {mediaUrl && (
+                    <div className="mt-4 relative rounded-[32px] overflow-hidden border-4 border-gray-50 dark:border-gray-800 aspect-video bg-black flex items-center justify-center group shadow-xl">
+                      {mediaType === "video" ? (
+                        <video src={mediaUrl} controls className="max-h-full" />
+                      ) : (
+                        <img src={mediaUrl} alt="Preview" className="max-h-full object-contain" />
+                      )}
+                      <button 
+                        onClick={() => setMediaUrl("")}
+                        className="absolute top-6 right-6 p-3 bg-red-500 text-white rounded-full hover:scale-110 transition-all shadow-lg"
+                      >
+                        <X size={20} />
+                      </button>
+                      <div className="absolute bottom-6 left-6 px-4 py-2 bg-black/60 backdrop-blur-md rounded-full text-[10px] font-black text-white uppercase tracking-widest">
+                        Aperçu du média
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-6">
+                  <button 
+                    onClick={handlePostStatus}
+                    disabled={isSending}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest py-6 rounded-3xl shadow-2xl shadow-indigo-200 dark:shadow-none transition-all flex items-center justify-center gap-4 disabled:bg-gray-300 group"
+                  >
+                    {isSending ? (
+                      <Loader2 className="animate-spin" size={24} />
+                    ) : (
+                      <>
+                        <Send size={24} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                        <span>Publier sur WhatsApp</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+             </div>
+          </section>
         </div>
 
-        {/* Colonne de droite : Info & Aide */}
-        <div className="space-y-6">
-          <div className="bg-indigo-600 rounded-3xl p-8 text-white">
-            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-              <Info size={20} />
-              Status Hebdo
-            </h3>
-            <p className="text-indigo-100 text-sm leading-relaxed">
-              Vos statuts automatiques sont programmés tous les jours à 9h00 du matin.
-            </p>
-            <div className="mt-6 pt-6 border-t border-indigo-500/30">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-medium">Prochaine publication</span>
-                <span className="text-xs font-bold bg-indigo-500 px-2 py-1 rounded">Demain 09:00</span>
+        {/* Colonne Latérale : Programmation */}
+        <div className="space-y-8">
+           <section className="bg-white dark:bg-gray-900 rounded-[40px] p-8 border border-gray-100 dark:border-gray-800 shadow-sm">
+              <h3 className="text-lg font-black italic uppercase mb-6 flex items-center gap-3">
+                 <Calendar size={20} className="text-indigo-600" />
+                 Planning Quotidien
+              </h3>
+              
+              <div className="space-y-6">
+                 <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Heure de lancement</label>
+                    <div className="relative">
+                      <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                      <input 
+                        type="time" 
+                        value={scheduleTime}
+                        onChange={(e) => setScheduleTime(e.target.value)}
+                        className="w-full bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-2xl pl-12 pr-6 py-4 outline-none font-bold"
+                      />
+                    </div>
+                 </div>
+
+                 <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 block">Jours actifs</label>
+                    <div className="grid grid-cols-7 gap-2">
+                       {["D", "L", "M", "M", "J", "V", "S"].map((d, i) => (
+                         <button 
+                           key={i}
+                           onClick={() => selectedDays.includes(i) ? setSelectedDays(selectedDays.filter(day => day !== i)) : setSelectedDays([...selectedDays, i])}
+                           className={`aspect-square rounded-xl text-[10px] font-black transition-all ${selectedDays.includes(i) ? "bg-indigo-600 text-white shadow-lg shadow-indigo-100" : "bg-gray-100 dark:bg-gray-800 text-gray-400 hover:bg-gray-200"}`}
+                         >
+                           {d}
+                         </button>
+                       ))}
+                    </div>
+                 </div>
+
+                 <button 
+                   onClick={handleSaveSettings}
+                   className="w-full py-4 bg-gray-100 dark:bg-gray-800 hover:bg-indigo-600 hover:text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 group"
+                 >
+                   <Save size={16} className="group-hover:scale-110 transition-transform" />
+                   Enregistrer
+                 </button>
               </div>
-            </div>
-          </div>
 
-          <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 border border-gray-100 dark:border-gray-800">
-             <h3 className="font-bold mb-4 flex items-center gap-2">
-               <Save size={18} className="text-indigo-600" />
-               Programmation
-             </h3>
-             <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Heure de lancement</label>
-                  <input 
-                    type="time" 
-                    value={scheduleTime}
-                    onChange={(e) => setScheduleTime(e.target.value)}
-                    className="w-full bg-gray-50 dark:bg-black border border-gray-200 dark:border-gray-800 rounded-xl px-4 py-2 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Jours de la semaine</label>
-                  <div className="grid grid-cols-7 gap-1">
-                    {["D", "L", "M", "M", "J", "V", "S"].map((day, i) => (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          if (selectedDays.includes(i)) {
-                            setSelectedDays(selectedDays.filter(d => d !== i));
-                          } else {
-                            setSelectedDays([...selectedDays, i]);
-                          }
-                        }}
-                        className={`w-full aspect-square text-[10px] font-bold rounded-lg transition-all ${selectedDays.includes(i) ? "bg-indigo-600 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-400"}`}
-                      >
-                        {day}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <button 
-                  onClick={handleSaveSettings}
-                  className="w-full py-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
-                >
-                  <Save size={14} /> Enregistrer le planning
-                </button>
-             </div>
-          </div>
+              <div className="mt-8 p-6 bg-indigo-50 dark:bg-indigo-900/10 rounded-3xl border border-indigo-100 dark:border-indigo-900/20">
+                 <div className="flex items-start gap-3">
+                    <Info size={16} className="text-indigo-600 mt-1 shrink-0" />
+                    <p className="text-[11px] text-indigo-700 dark:text-indigo-300 font-medium leading-relaxed">
+                       Ces réglages définissent le <strong>statut par défaut</strong> de cette instance. Pour programmer plusieurs contenus différents, utilisez le <strong>Gestionnaire de Statuts</strong>.
+                    </p>
+                 </div>
+              </div>
+           </section>
 
-          <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 border border-gray-100 dark:border-gray-800">
-             <h3 className="font-bold mb-4">Conseils</h3>
-             <ul className="text-sm text-gray-500 space-y-3 list-disc list-inside">
-               <li>Utilisez des images format portrait (9:16)</li>
-               <li>L'IA s'adapte au ton de votre System Prompt</li>
-               <li>Les vidéos ne doivent pas dépasser 30 secondes</li>
-             </ul>
-          </div>
+           <section className="bg-black rounded-[40px] p-8 text-white relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                 <Sparkles size={80} />
+              </div>
+              <h3 className="font-black italic uppercase text-sm mb-4">Conseil Pro</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                 L'IA utilise votre <strong>System Prompt</strong> pour donner une personnalité unique à vos statuts. Plus votre prompt est détaillé, plus les textes seront engageants !
+              </p>
+           </section>
         </div>
       </div>
     </div>

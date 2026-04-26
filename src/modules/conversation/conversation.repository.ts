@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { Role } from "@prisma/client/wasm";
+import { Role } from "@prisma/client";
 
 export class ConversationRepository {
   static async getOrCreateContact(
