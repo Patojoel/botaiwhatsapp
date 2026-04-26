@@ -137,52 +137,112 @@ enum Role {
 
 ---
 
-### 🔲 PHASE 2 — Dashboard Admin
+### ✅ PHASE 2 — Dashboard Admin
 
 **Objectif** : Interface de gestion
 
-- [ ] Page `/dashboard` avec liste des conversations
-- [ ] Visualisation des messages par utilisateur
-- [ ] Statistiques (nb messages, utilisateurs actifs)
-- [ ] Bouton reconnexion WhatsApp
-- [ ] Affichage QR Code intégré
-- [ ] Auth simple (credentials)
+- [x] Page `/dashboard` avec liste des conversations
+- [x] Visualisation des messages par utilisateur
+- [x] Statistiques (nb messages, utilisateurs actifs)
+- [x] Bouton reconnexion WhatsApp
+- [x] Affichage QR Code intégré
+- [x] Auth simple (credentials)
 
 ---
 
-### 🔲 PHASE 3 — Personnalisation IA
+### ✅ PHASE 3 — Personnalisation IA
 
 **Objectif** : IA adaptable par domaine
 
-- [ ] Gestion des prompts système via DB
-- [ ] Profils de bot (boutique, support, info)
-- [ ] Mémoire longue terme (résumé conversations)
-- [ ] Détection d'intention (achat, info, plainte)
-- [ ] Réponses avec boutons/listes WhatsApp
+- [x] Gestion des prompts système via DB
+- [x] Profils de bot (boutique, support, info)
+- [x] Mémoire longue terme (résumé conversations)
+- [x] Détection d'intention (achat, info, plainte)
+- [x] Réponses avec boutons/listes WhatsApp
 
 ---
 
-### 🔲 PHASE 4 — Multi-Bot & Scalabilité
+### ✅ PHASE 4 — Multi-Bot & Scalabilité
 
 **Objectif** : Gérer plusieurs instances WhatsApp
 
-- [ ] Support multi-sessions Baileys
-- [ ] Queue de messages (Bull/BullMQ)
-- [ ] Retry automatique sur erreur IA
-- [ ] Rate limiting par utilisateur
-- [ ] Webhooks sortants configurables
+- [x] Support multi-sessions Baileys
+- [x] Queue de messages (Bull/BullMQ)
+- [x] Retry automatique sur erreur IA
+- [x] Rate limiting par utilisateur
+- [x] Webhooks sortants configurables
 
 ---
 
-### 🔲 PHASE 5 — Production
+### ✅ PHASE 5 — Production
 
 **Objectif** : Déploiement robuste
 
-- [ ] Docker + docker-compose
-- [ ] CI/CD GitHub Actions
-- [ ] Monitoring (Sentry ou equivalent)
-- [ ] Backup automatique DB
-- [ ] Documentation API Swagger
+- [x] Docker + docker-compose
+- [x] CI/CD GitHub Actions
+- [x] Monitoring (Sentry ou equivalent)
+- [x] Backup automatique DB
+- [x] Documentation API Swagger
+
+---
+
+### 🔲 PHASE 6 — SaaS Architecture & Auth
+
+**Objectif** : Transformer le bot unique en plateforme multi-utilisateur
+
+- [ ] Refonte du schéma DB pour le multi-tenant (Account, Member, Subscription, BotInstance)
+- [ ] Intégration de NextAuth.js / Auth.js (Google, Email/Magic Link)
+- [ ] Gestion des rôles et permissions (ADMIN, USER)
+- [ ] Isolation stricte des données entre les utilisateurs (Multi-Tenancy)
+- [ ] Middlewares de sécurité pour les accès Dashboard
+
+---
+
+### 🔲 PHASE 7 — Multi-Instance WhatsApp Pro
+
+**Objectif** : Permettre à chaque utilisateur de connecter son propre bot
+
+- [ ] Refactorisation de `WhatsAppService` pour gérer N sockets simultanés
+- [ ] Système de stockage des sessions Baileys dynamique (DB ou Redis)
+- [ ] Interface de scan QR Code unique par compte utilisateur
+- [ ] API de monitoring du statut des instances (Starting, QR, Connected, Error)
+- [ ] Gestion automatique de la reconnexion des instances déconnectées
+
+---
+
+### 🔲 PHASE 8 — Panel Utilisateur SaaS (User UI)
+
+**Objectif** : Interface complète pour les clients du SaaS
+
+- [ ] Dashboard client personnalisé (Stats propres, crédits consommés)
+- [ ] Console de visualisation des conversations en temps réel
+- [ ] Système de quotas et crédits messages par abonnement
+- [ ] Configuration de la clé API IA personnelle (BYOK) ou partagée
+- [ ] Gestion des paramètres de notification
+
+---
+
+### 🔲 PHASE 9 — Personnalisation Avancée & Live Chat
+
+**Objectif** : Contrôle expert sur le comportement des bots
+
+- [ ] Éditeur de Prompt Système visuel par instance
+- [ ] Système de "Takeover" : Reprise manuelle d'une conversation par l'utilisateur
+- [ ] Déclenchement de webhooks externes lors de détections d'intentions
+- [ ] Export des rapports de performance et de satisfaction (NPS IA)
+- [ ] Support multi-agents pour un même bot instance
+
+---
+
+### 🔲 PHASE 10 — Monétisation & Global Scaling
+
+**Objectif** : Lancement commercial et montée en charge
+
+- [ ] Intégration Stripe (Plans Basic, Pro, Enterprise)
+- [ ] Infrastructure Docker Swarm / Kubernetes pour le scaling des sockets
+- [ ] API Publique pour intégrations tierces (Zapier, Make.com)
+- [ ] Internationalisation de l'interface (Multi-langue i18n)
+- [ ] Monitoring SaaS global (Downtime, Latence IA, Erreurs socket)
 
 ---
 
@@ -195,6 +255,11 @@ enum Role {
 | 3     | ✅ Terminé | 100%       |
 | 4     | ✅ Terminé | 100%       |
 | 5     | ✅ Terminé | 100%       |
+| 6     | ✅ Terminé | 100%       |
+| 7     | ✅ Terminé | 100%       |
+| 8     | 🔲 À faire | 0%         |
+| 9     | 🔲 À faire | 0%         |
+| 10    | 🔲 À faire | 0%         |
 
 ---
 
@@ -219,4 +284,4 @@ npx prisma studio
 
 ---
 
-_Dernière mise à jour : Phase 1 MVP — $(date)_
+_Dernière mise à jour : Transformation SaaS lancée — $(date)_

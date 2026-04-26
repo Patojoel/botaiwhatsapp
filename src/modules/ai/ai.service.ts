@@ -12,18 +12,21 @@ export class AIService {
     this.provider = provider;
   }
 
-  private async getActiveProfile() {
-    return prisma.botProfile.findFirst({
-      where: { isActive: true },
+  private async getBotPrompt(botInstanceId: string) {
+    const instance = await prisma.botInstance.findUnique({
+      where: { id: botInstanceId },
+      select: { systemPrompt: true },
     });
+    return instance?.systemPrompt;
   }
 
   async generateResponse(
+    botInstanceId: string,
     messages: { role: "user" | "assistant"; content: string }[],
     fallbackPrompt: string = "Tu es un assistant commercial intelligent, court et concis pour WhatsApp.",
   ): Promise<string> {
-    const profile = await this.getActiveProfile();
-    const systemPrompt = profile?.systemPrompt || fallbackPrompt;
+    const botPrompt = await this.getBotPrompt(botInstanceId);
+    const systemPrompt = botPrompt || fallbackPrompt;
 
     const formattedMessages: AIMessage[] = [
       { role: "system", content: systemPrompt },
@@ -36,27 +39,27 @@ export class AIService {
       const { reply, duration, modelName } =
         await this.provider.generateResponse(formattedMessages);
       logger.info(
-        `[AI] Génération réponse — modèle: ${modelName}, durée: ${duration}ms`,
+        `[AI] Response generated for bot ${botInstanceId} — model: ${modelName}, duration: ${duration}ms`,
       );
       return reply;
     } catch (error) {
-      logger.error({ error }, `[AI] Erreur génération: ${error}`);
+      logger.error(
+        { error, botInstanceId },
+        `[AI] Generation error for bot ${botInstanceId}: ${error}`,
+      );
       throw error;
     }
   }
 }
 
-// Inversion de dépendance active
-// Permet de brancher l'IA désirée de manière dynamique !
 function getActiveProvider(): IAIProvider {
-  const providerName = process.env.AI_PROVIDER ;
+  const providerName = process.env.AI_PROVIDER || "openrouter";
 
   if (providerName === "groq") {
     return new GroqProvider();
   } else if (providerName === "huggingface") {
     return new HuggingFaceProvider();
   } else {
-    // Fallback original
     return new OpenRouterProvider();
   }
 }

@@ -7,33 +7,142 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String    @id @default(cuid())
-  phone     String    @unique
-  name      String?
-  createdAt DateTime  @default(now())
-  messages  Message[]
+// NextAuth Models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User { // SaaS User (Owner)
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?   // For credentials
+  role          UserRole  @default(USER)
+  
+  accounts      Account[]
+  sessions      Session[]
+  instances     BotInstance[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// WhatsApp Models
+model BotInstance {
+  id           String      @id @default(cuid())
+  name         String
+  phone        String?     
+  sessionId    String      @unique
+  status         BotStatus   @default(DISCONNECTED)
+  systemPrompt   String      @default("Tu es un assistant commercial intelligent, court et concis pour WhatsApp.")
+  statusMediaUrl String?     @db.Text
+  statusMediaType String      @default("image") // "image" ou "video"
+  
+  ownerId      String
+  owner        User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  contacts     Contact[]
+  messages     Message[]
+  sessions     WhatsappSession[]
+  promptHistory PromptHistory[]
+  
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model WhatsappSession {
+  id            String      @id @default(cuid())
+  botInstanceId String
+  key           String      // e.g. "creds" or "pre-key-1"
+  value         String      @db.Text
+  
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+
+  @@unique([botInstanceId, key])
+}
+
+model PromptHistory {
+  id            String      @id @default(cuid())
+  botInstanceId String
+  prompt        String      @db.Text
+  createdAt     DateTime    @default(now())
+
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+}
+
+enum BotStatus {
+  DISCONNECTED
+  CONNECTING
+  QR_READY
+  CONNECTED
+}
+
+model Contact { // Renamed from User to avoid conflict
+  id            String      @id @default(cuid())
+  phone         String
+  name          String?
+  createdAt     DateTime    @default(now())
+  
+  botInstanceId String
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+  
+  messages      Message[]
+
+  @@unique([phone, botInstanceId])
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  role      Role
-  content   String
-  createdAt DateTime @default(now())
+  id            String      @id @default(cuid())
+  role          Role
+  content       String
+  createdAt     DateTime    @default(now())
+  
+  contactId     String
+  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  botInstanceId String
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
 }
 
 enum Role {
   user
   assistant
-}
-
-model BotProfile {
-  id          String   @id @default(cuid())
-  name        String   // e.g., Boutique, Support, Info
-  systemPrompt String
-  isActive    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }

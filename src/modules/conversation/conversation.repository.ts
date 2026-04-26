@@ -3,47 +3,71 @@ import { logger } from "@/lib/logger";
 import { Role } from "@prisma/client/wasm";
 
 export class ConversationRepository {
-  static async getOrCreateUser(phone: string, name?: string) {
+  static async getOrCreateContact(
+    botInstanceId: string,
+    phone: string,
+    name?: string,
+  ) {
     try {
-      let user = await prisma.user.findUnique({
-        where: { phone },
+      let contact = await prisma.contact.findUnique({
+        where: {
+          phone_botInstanceId: {
+            phone,
+            botInstanceId,
+          },
+        },
       });
 
-      if (!user) {
-        user = await prisma.user.create({
-          data: { phone, name },
+      if (!contact) {
+        contact = await prisma.contact.create({
+          data: {
+            phone,
+            name,
+            botInstanceId,
+          },
         });
-        logger.info({ phone }, `[Conversation] Nouvel utilisateur créé`);
+        logger.info(
+          { phone, botInstanceId },
+          `[Conversation] Nouveau contact créé`,
+        );
       }
 
-      return user;
+      return contact;
     } catch (error) {
-      logger.error({ phone, error }, `[Conversation] Erreur getOrCreateUser`);
+      logger.error(
+        { phone, botInstanceId, error },
+        `[Conversation] Erreur getOrCreateContact`,
+      );
       throw error;
     }
   }
 
-  static async getHistory(userId: string, limit: number = 10) {
+  static async getHistory(contactId: string, limit: number = 10) {
     try {
       const messages = await prisma.message.findMany({
-        where: { userId },
+        where: { contactId },
         orderBy: { createdAt: "desc" },
         take: limit,
       });
 
-      // Remettre dans l'ordre chronologique
       return messages.reverse();
     } catch (error) {
-      logger.error({ userId, error }, `[Conversation] Erreur getHistory`);
+      logger.error({ contactId, error }, `[Conversation] Erreur getHistory`);
       throw error;
     }
   }
 
-  static async saveMessage(userId: string, role: Role, content: string) {
+  static async saveMessage(
+    botInstanceId: string,
+    contactId: string,
+    role: Role,
+    content: string,
+  ) {
     try {
       const message = await prisma.message.create({
         data: {
-          userId,
+          contactId,
+          botInstanceId,
           role,
           content,
         },
@@ -52,7 +76,8 @@ export class ConversationRepository {
     } catch (error) {
       logger.error(
         {
-          userId,
+          botInstanceId,
+          contactId,
           role,
           error,
         },

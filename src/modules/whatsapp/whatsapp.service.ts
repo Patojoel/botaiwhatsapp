@@ -1,41 +1,77 @@
 import makeWASocket, {
-  useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
+import { usePrismaAuthState } from "./prisma-auth";
 import { Boom } from "@hapi/boom";
 import { logger } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
 import { ConversationRepository } from "../conversation/conversation.repository";
 import { aiService } from "../ai/ai.service";
-import fs from "fs";
 import pino from "pino";
+import path from "path";
+import { EventEmitter } from "events";
+import { messageQueue } from "@/lib/queue";
 
-const globalForBaileys = global as unknown as { whatsappSocket: any };
+interface InstanceData {
+  socket: any;
+  qrCode: string | null;
+  status: "Disconnected" | "Connecting" | "Connected" | "QR Ready";
+}
+
+const globalForBaileys = global as unknown as {
+  whatsappInstances: Map<string, InstanceData>;
+  whatsappEvents: EventEmitter;
+};
+
+if (!globalForBaileys.whatsappInstances) {
+  globalForBaileys.whatsappInstances = new Map();
+}
+
+if (!globalForBaileys.whatsappEvents) {
+  globalForBaileys.whatsappEvents = new EventEmitter();
+  globalForBaileys.whatsappEvents.setMaxListeners(100);
+}
 
 export class WhatsAppService {
-  private static get socket() {
-    return globalForBaileys.whatsappSocket;
+  private static get instances() {
+    return globalForBaileys.whatsappInstances;
   }
-  private static set socket(s: any) {
-    globalForBaileys.whatsappSocket = s;
-  }
-  public static qrCode: string | null = null;
-  public static status:
-    | "Disconnected"
-    | "Connecting"
-    | "Connected"
-    | "QR Ready" = "Disconnected";
 
-  static async initialize() {
-    if (this.socket) {
-      this.status = "Connected";
+  static get events() {
+    return globalForBaileys.whatsappEvents;
+  }
+
+  static async initializeAll() {
+    const activeInstances = await prisma.botInstance.findMany({
+      where: { status: { not: "DISCONNECTED" } },
+    });
+
+    for (const instance of activeInstances) {
+      await this.initializeInstance(instance.id);
+    }
+  }
+
+  static async initializeInstance(botInstanceId: string) {
+    const existing = this.instances.get(botInstanceId);
+    if (existing?.status === "Connected" || existing?.status === "Connecting") {
       return;
     }
-    this.status = "Connecting";
+
+    if (existing?.socket) {
+      try {
+        existing.socket.end();
+      } catch (e) {}
+    }
+
+    logger.info(`[WhatsApp] Initialisation de l'instance: ${botInstanceId}`);
+    this.updateInstanceState(botInstanceId, {
+      status: "Connecting",
+      qrCode: null,
+    });
 
     try {
-      const { state, saveCreds } =
-        await useMultiFileAuthState("auth_info_baileys");
+      const { state, saveCreds } = await usePrismaAuthState(botInstanceId);
       const { version } = await fetchLatestBaileysVersion();
 
       const sock = makeWASocket({
@@ -45,13 +81,20 @@ export class WhatsAppService {
         logger: pino({ level: "silent" }) as any,
       });
 
-      sock.ev.on("connection.update", (update) => {
+      this.instances.get(botInstanceId)!.socket = sock;
+
+      sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-          this.qrCode = qr;
-          this.status = "QR Ready";
-          logger.info("[WhatsApp] QR Code prêt à être scanné");
+          this.updateInstanceState(botInstanceId, {
+            qrCode: qr,
+            status: "QR Ready",
+          });
+          await prisma.botInstance.update({
+            where: { id: botInstanceId },
+            data: { status: "QR_READY" },
+          });
         }
 
         if (connection === "close") {
@@ -59,31 +102,42 @@ export class WhatsAppService {
             (lastDisconnect?.error as Boom)?.output?.statusCode !==
             DisconnectReason.loggedOut;
 
-          logger.warn(
-            {
-              error: lastDisconnect?.error,
-            },
-            `[WhatsApp] Déconnecté. Reconnexion: ${shouldReconnect}`,
-          );
-
-          this.socket = null;
-          this.status = "Disconnected";
+          this.updateInstanceState(botInstanceId, {
+            status: "Disconnected",
+            qrCode: null,
+          });
+          await prisma.botInstance.update({
+            where: { id: botInstanceId },
+            data: { status: "DISCONNECTED" },
+          });
 
           if (shouldReconnect) {
-            this.initialize();
+            this.initializeInstance(botInstanceId);
           } else {
-            // Logged out
             logger.info(
-              "[WhatsApp] Déconnecté intentionnellement (logged out). Suppression des credentials...",
+              `[WhatsApp] Instance ${botInstanceId} déconnectée définitivement`,
             );
-            if (fs.existsSync("auth_info_baileys")) {
-              fs.rmSync("auth_info_baileys", { recursive: true, force: true });
-            }
+            // Les sessions sont déjà gérées par la cascade Prisma si l'instance est supprimée
+            // ou on peut faire un cleanup manuel ici si on veut nettoyer uniquement les clés de session
+            await prisma.whatsappSession.deleteMany({
+              where: { botInstanceId },
+            });
           }
         } else if (connection === "open") {
-          this.status = "Connected";
-          this.qrCode = null;
-          logger.info("[WhatsApp] Connecté avec succès !");
+          this.updateInstanceState(botInstanceId, {
+            status: "Connected",
+            qrCode: null,
+          });
+          await prisma.botInstance.update({
+            where: { id: botInstanceId },
+            data: {
+              status: "CONNECTED",
+              phone: sock.user?.id.split(":")[0].split("@")[0],
+            },
+          });
+          logger.info(
+            `[WhatsApp] Instance ${botInstanceId} connectée (${sock.user?.id})`,
+          );
         }
       });
 
@@ -94,87 +148,113 @@ export class WhatsAppService {
         const msg = m.messages[0];
 
         if (!msg.message || msg.key.fromMe) return;
-        if (msg.key.remoteJid?.endsWith("@g.us")) return; // Ignore les groupes
-        if (msg.key.remoteJid === "status@broadcast") return; // Ignore les statuts
+        if (msg.key.remoteJid?.endsWith("@g.us")) return;
+        if (msg.key.remoteJid === "status@broadcast") return;
 
         const senderPhone =
           msg.key.remoteJid?.replace("@s.whatsapp.net", "") || "";
         const pushName = msg.pushName || undefined;
-
-        // Extraction du texte (texte brut ou réponse à un message)
         const content =
           msg.message.conversation || msg.message.extendedTextMessage?.text;
 
-        if (!content) return; // Ignore si pas de texte
-
-        const maskedPhone = senderPhone.replace(
-          /(\d{2})(\d+)(\d{4})/,
-          "$1***$3",
-        );
-        logger.info(`[WhatsApp] Message reçu de ${maskedPhone}`);
+        if (!content) return;
 
         try {
-          // 1. Récupérer ou créer l'utilisateur
-          const user = await ConversationRepository.getOrCreateUser(
+          const contact = await ConversationRepository.getOrCreateContact(
+            botInstanceId,
             senderPhone,
             pushName,
           );
-
-          // 2. Sauvegarder le message de l'utilisateur
-          await ConversationRepository.saveMessage(user.id, "user", content);
-
-          // 3. Récupérer l'historique (10 messages max)
-          const history = await ConversationRepository.getHistory(user.id, 10);
-          const aiMessages = history.map((h: any) => ({
-            role: h.role === "user" ? "user" : "assistant",
-            content: h.content,
-          })) as { role: "user" | "assistant"; content: string }[];
-
-          // 4. Appeler l'IA
-          const aiResponse = await aiService.generateResponse(aiMessages);
-
-          // 5. Sauvegarder la réponse
           await ConversationRepository.saveMessage(
-            user.id,
-            "assistant",
-            aiResponse,
+            botInstanceId,
+            contact.id,
+            "user",
+            content,
           );
 
-          // 6. Envoyer la réponse WhatsApp
-          await sock.sendMessage(msg.key.remoteJid!, { text: aiResponse });
-          logger.info(`[WhatsApp] Réponse envoyée à ${maskedPhone}`);
+          // Phase 3 : Déléguer à BullMQ pour le traitement asynchrone (IA + réponse)
+          await messageQueue.add("processAI", {
+            botInstanceId,
+            contactId: contact.id,
+            remoteJid: msg.key.remoteJid,
+          });
         } catch (error) {
           logger.error(
-            { error },
-            `[WhatsApp] Erreur traitement message de ${senderPhone}`,
+            { error, botInstanceId },
+            `[WhatsApp] Erreur réception message instance ${botInstanceId}`,
           );
-          await sock.sendMessage(msg.key.remoteJid!, {
-            text: "Désolé, le service est momentanément indisponible. Veuillez réessayer plus tard.",
-          });
         }
       });
-
-      this.socket = sock;
     } catch (error) {
-      logger.error({ error }, "[WhatsApp] Erreur initialisation");
-      this.status = "Disconnected";
+      logger.error(
+        { error, botInstanceId },
+        `[WhatsApp] Erreur initialisation instance ${botInstanceId}`,
+      );
+      this.updateInstanceState(botInstanceId, { status: "Disconnected" });
     }
   }
 
-  static async reconnect() {
-    logger.info("[WhatsApp] Demande de reconnexion manuelle...");
-    this.status = "Disconnected";
-    this.qrCode = null;
-    if (this.socket) {
-      this.socket.end(new Error("Manual reconnect"));
-      this.socket = null;
+  private static updateInstanceState(
+    botInstanceId: string,
+    partialData: Partial<InstanceData>,
+  ) {
+    const current = this.instances.get(botInstanceId) || {
+      socket: null,
+      qrCode: null,
+      status: "Disconnected",
+    };
+    const updated = { ...current, ...partialData };
+    this.instances.set(botInstanceId, updated);
+
+    // Émettre l'événement de mise à jour
+    this.events.emit(`update:${botInstanceId}`, {
+      status: updated.status,
+      qrCode: updated.qrCode,
+    });
+  }
+
+  static getInstanceStatus(botInstanceId: string) {
+    return (
+      this.instances.get(botInstanceId) || {
+        status: "Disconnected",
+        qrCode: null,
+      }
+    );
+  }
+
+  static async logoutInstance(botInstanceId: string) {
+    const instance = this.instances.get(botInstanceId);
+    if (instance?.socket) {
+      await instance.socket.logout();
+      this.instances.delete(botInstanceId);
+    }
+  }
+
+  static async sendTextMessage(
+    botInstanceId: string,
+    remoteJid: string,
+    text: string,
+  ) {
+    const instance = this.instances.get(botInstanceId);
+    if (!instance || instance.status !== "Connected" || !instance.socket) {
+      throw new Error(`Instance ${botInstanceId} is not connected`);
+    }
+    await instance.socket.sendMessage(remoteJid, { text });
+  }
+
+  static async sendStatusUpdate(botInstanceId: string, text: string, mediaUrl?: string, mediaType: "image" | "video" = "image") {
+    const instance = this.instances.get(botInstanceId);
+    if (!instance || instance.status !== "Connected" || !instance.socket) {
+      throw new Error(`Instance ${botInstanceId} is not connected`);
     }
 
-    // Attendre un peu avant de relancer
-    setTimeout(() => {
-      this.initialize();
-    }, 2000);
-
-    return true;
+    if (mediaUrl) {
+      await instance.socket.sendMessage("status@broadcast", {
+        [mediaType]: { url: mediaUrl },
+        caption: text,
+      });
+    } else {
+      await instance.socket.sendMessage("status@broadcast", { text });
+    }
   }
 }

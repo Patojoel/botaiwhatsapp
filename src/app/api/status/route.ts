@@ -1,17 +1,24 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { WhatsAppService } from "@/modules/whatsapp/whatsapp.service";
 import QRCode from "qrcode";
 
-export async function GET() {
-  try {
-    // Initialiser Baileys si ce n'est pas déjà fait
-    WhatsAppService.initialize();
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const instanceId = searchParams.get("instanceId");
 
-    const status = WhatsAppService.status;
+  if (!instanceId) {
+    return NextResponse.json({ error: "Missing instanceId" }, { status: 400 });
+  }
+
+  try {
+    // Tenter d'initialiser l'instance si elle n'est pas active
+    await WhatsAppService.initializeInstance(instanceId);
+
+    const { status, qrCode } = WhatsAppService.getInstanceStatus(instanceId);
     let qrDataUrl = null;
 
-    if (WhatsAppService.qrCode) {
-      qrDataUrl = await QRCode.toDataURL(WhatsAppService.qrCode);
+    if (qrCode) {
+      qrDataUrl = await QRCode.toDataURL(qrCode);
     }
 
     return NextResponse.json({
