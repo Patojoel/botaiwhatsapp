@@ -23,6 +23,7 @@ export class AIService {
   async generateResponse(
     botInstanceId: string,
     messages: { role: "user" | "assistant"; content: string }[],
+    imageUrl?: string,
     fallbackPrompt: string = "Tu es un assistant commercial intelligent, court et concis pour WhatsApp.",
   ): Promise<string> {
     const botPrompt = await this.getBotPrompt(botInstanceId);
@@ -30,10 +31,20 @@ export class AIService {
 
     const formattedMessages: AIMessage[] = [
       { role: "system", content: systemPrompt },
-      ...messages.map(
-        (m) => ({ role: m.role, content: m.content }) as AIMessage,
-      ),
-    ];
+      ...messages.map((m, idx) => {
+        // Si c'est le dernier message de l'utilisateur et qu'il y a une image
+        if (idx === messages.length - 1 && m.role === "user" && imageUrl) {
+          return {
+            role: "user",
+            content: [
+              { type: "text", text: m.content },
+              { type: "image_url", image_url: { url: imageUrl } },
+            ],
+          };
+        }
+        return { role: m.role, content: m.content };
+      }),
+    ] as AIMessage[];
 
     try {
       const { reply, duration, modelName } =

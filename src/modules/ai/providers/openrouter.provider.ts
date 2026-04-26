@@ -36,7 +36,7 @@ export class OpenRouterProvider implements IAIProvider {
           messages: messages,
           max_tokens: 500,
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(60000), // Augmenté à 60s pour la vision
       },
     );
 

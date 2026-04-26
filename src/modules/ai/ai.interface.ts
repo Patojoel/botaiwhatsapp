@@ -1,7 +1,11 @@
 export interface AIMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | AIMultimodalContent[];
 }
+
+export type AIMultimodalContent = 
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 export interface IAIProvider {
   /**

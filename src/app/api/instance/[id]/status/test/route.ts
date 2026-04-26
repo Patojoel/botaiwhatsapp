@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { WhatsAppService } from "@/modules/whatsapp/whatsapp.service";
 import { auth } from "@/auth";
 import { aiService } from "@/modules/ai/ai.service";
+import fs from "fs/promises";
+import path from "path";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
+
+  
   // On laisse passer pour le test si désactivé
   /*
   if (!session?.user) {
@@ -19,15 +23,36 @@ export async function POST(
 
   try {
     const body = await req.json();
-    const { mediaUrl, mediaType } = body;
+    const { mediaUrl, mediaType, customText } = body;
 
-    // Générer un message via l'IA
-    const statusText = await aiService.generateResponse(instanceId, [
-      {
-        role: "user",
-        content: "Génère un court message inspirant (max 150 car.) pour un statut WhatsApp.",
-      },
-    ]);
+    // Si c'est un fichier local (upload), on le convertit en Base64 pour l'IA
+    let aiMediaUrl = mediaUrl;
+    if (mediaUrl && mediaUrl.includes("/uploads/")) {
+      try {
+        const fileName = mediaUrl.split("/uploads/")[1];
+        const filePath = path.join(process.cwd(), "public", "uploads", fileName);
+        const fileBuffer = await fs.readFile(filePath);
+        const base64Image = fileBuffer.toString("base64");
+        const mimeType = fileName.endsWith(".png") ? "image/png" : "image/jpeg";
+        aiMediaUrl = `data:${mimeType};base64,${base64Image}`;
+      } catch (err) {
+        console.error("Failed to read local file for AI:", err);
+      }
+    }
+
+    // Utiliser le texte personnalisé ou générer via l'IA (avec analyse d'image si dispo)
+    const statusText = customText || await aiService.generateResponse(
+      instanceId, 
+      [
+        {
+          role: "user",
+          content: aiMediaUrl && mediaType === "image" 
+            ? "Analyse cette image et génère un court message inspirant ou une légende adaptée (max 150 car.) pour mon statut WhatsApp."
+            : "Génère un court message inspirant (max 150 car.) pour un statut WhatsApp.",
+        },
+      ],
+      aiMediaUrl && mediaType === "image" ? aiMediaUrl : undefined
+    );
 
     await WhatsAppService.sendStatusUpdate(instanceId, statusText, mediaUrl, mediaType);
 

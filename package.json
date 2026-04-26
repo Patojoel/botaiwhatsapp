@@ -20,6 +20,7 @@
     "bullmq": "^5.70.4",
     "date-fns": "^4.1.0",
     "ioredis": "^5.10.0",
+    "lucide-react": "^1.11.0",
     "next": "^16.1.6",
     "next-auth": "^5.0.0-beta.25",
     "pino": "^10.3.1",
@@ -28,7 +29,8 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-react": "^5.32.0"
+    "swagger-ui-react": "^5.32.0",
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -38,6 +40,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-react": "^5.18.0",
+    "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.27",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.1.6",

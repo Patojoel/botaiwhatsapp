@@ -248,13 +248,25 @@ export class WhatsAppService {
       throw new Error(`Instance ${botInstanceId} is not connected`);
     }
 
+    // Récupérer tous les contacts pour s'assurer que le statut est visible par eux
+    const contacts = await prisma.contact.findMany({
+      where: { botInstanceId: botInstanceId },
+      select: { phone: true }
+    });
+    // On s'assure que chaque téléphone a le bon suffixe WhatsApp
+    const jids = contacts.map(c => c.phone.includes("@") ? c.phone : `${c.phone}@s.whatsapp.net`);
+
     if (mediaUrl) {
       await instance.socket.sendMessage("status@broadcast", {
         [mediaType]: { url: mediaUrl },
         caption: text,
-      });
+      }, { statusJidList: jids });
     } else {
-      await instance.socket.sendMessage("status@broadcast", { text });
+      await instance.socket.sendMessage("status@broadcast", { 
+        text,
+        backgroundColor: "#075E54",
+        font: 1
+      }, { statusJidList: jids });
     }
   }
 }

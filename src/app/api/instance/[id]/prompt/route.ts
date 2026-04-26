@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { updateBotStatusSchedule } from "@/lib/queue";
 
 export async function PATCH(
   req: NextRequest,
@@ -34,25 +35,33 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    // Sauvegarder l'ancien prompt dans l'historique si on le modifie
-    if (systemPrompt && instance.systemPrompt && systemPrompt !== instance.systemPrompt) {
-      await (prisma as any).promptHistory.create({
-        data: {
-          botInstanceId: instanceId,
-          prompt: instance.systemPrompt,
-        },
-      });
-    }
-
     const updateData: any = {};
     if (systemPrompt !== undefined) updateData.systemPrompt = systemPrompt;
     if (statusMediaUrl !== undefined) updateData.statusMediaUrl = statusMediaUrl;
     if (statusMediaType !== undefined) updateData.statusMediaType = statusMediaType;
+    if (statusSchedule !== undefined) updateData.statusSchedule = statusSchedule;
+
+    // Si on a un nouveau prompt, on sauvegarde l'historique
+    if (systemPrompt) {
+      if (instance.systemPrompt !== systemPrompt) {
+        await (prisma as any).promptHistory.create({
+          data: {
+            botInstanceId: instanceId,
+            prompt: instance.systemPrompt,
+          },
+        });
+      }
+    }
 
     const updated = await prisma.botInstance.update({
       where: { id: instanceId },
       data: updateData,
     });
+
+    // Si le calendrier a changé, on met à jour BullMQ
+    if (statusSchedule !== undefined) {
+      await updateBotStatusSchedule(instanceId, statusSchedule);
+    }
 
     return NextResponse.json({ success: true, instance: updated });
   } catch (error) {

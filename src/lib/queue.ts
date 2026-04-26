@@ -41,18 +41,47 @@ export const scheduleDailyStatuses = async (instances: string[]) => {
     }
   }
 
-  for (const botInstanceId of instances) {
+  const activeInstances = await (prisma as any).botInstance.findMany({
+    where: { id: { in: instances } },
+    select: { id: true, statusSchedule: true }
+  });
+
+  for (const bot of activeInstances) {
     await messageQueue.add(
       "dailyStatus",
-      { botInstanceId },
+      { botInstanceId: bot.id },
       {
         repeat: {
-          pattern: "0 9 * * *", // Tous les jours à 9h00
+          pattern: bot.statusSchedule || "0 9 * * *",
         },
       },
     );
   }
-  logger.info(`[Queue] Statuts quotidiens planifiés pour ${instances.length} instances.`);
+  logger.info(`[Queue] Statuts planifiés pour ${activeInstances.length} instances.`);
+};
+
+/**
+ * Met à jour la programmation pour une instance spécifique
+ */
+export const updateBotStatusSchedule = async (botInstanceId: string, cron: string) => {
+  const repeatableJobs = await messageQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    // BullMQ stocke les données dans job.id sous forme 'name:pattern:...'
+    if (job.name === "dailyStatus" && job.key.includes(botInstanceId)) {
+      await messageQueue.removeRepeatableByKey(job.key);
+    }
+  }
+
+  await messageQueue.add(
+    "dailyStatus",
+    { botInstanceId },
+    {
+      repeat: {
+        pattern: cron,
+      },
+    },
+  );
+  logger.info(`[Queue] Nouvelle programmation pour ${botInstanceId}: ${cron}`);
 };
 
 // Instance d'un simple worker si on voulait l'activer dans ce même process
