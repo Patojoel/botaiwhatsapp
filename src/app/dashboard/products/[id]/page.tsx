@@ -1,4 +1,5 @@
 import ProductForm from "@/components/ProductForm";
+import VideoPromoGenerator from "@/components/VideoPromoGenerator";
 import { ChevronLeft, Edit3 } from "lucide-react";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
@@ -14,6 +15,10 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
   if (!product) {
     notFound();
   }
+
+  const botInstances = await prisma.botInstance.findMany({
+    select: { id: true, name: true }
+  });
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-8">
@@ -34,6 +39,8 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
           <Edit3 className="w-6 h-6 text-amber-400" />
         </div>
       </div>
+
+      <VideoPromoGenerator productId={id} botInstances={botInstances} />
 
       <ProductForm initialData={product} />
     </div>

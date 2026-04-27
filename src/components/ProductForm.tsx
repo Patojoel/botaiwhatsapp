@@ -44,7 +44,7 @@ export default function ProductForm({ initialData }: ProductFormProps) {
   const [newImageUrl, setNewImageUrl] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -53,22 +53,63 @@ export default function ProductForm({ initialData }: ProductFormProps) {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.size > 2 * 1024 * 1024) { // Limite 2MB pour le Base64
-        alert(`L'image ${file.name} est trop lourde (max 2Mo)`);
-        continue;
-      }
+      
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const base64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(file);
-      });
-      newImages.push(base64);
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        if (data.url) newImages.push(data.url);
+      } catch (err) {
+        console.error("Upload failed", err);
+      }
     }
 
     setFormData(prev => ({
       ...prev,
       images: [...prev.images, ...newImages]
+    }));
+    setIsUploading(false);
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    const newVideos: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      // Limite 50MB pour les vidéos
+      if (file.size > 50 * 1024 * 1024) {
+        alert("La vidéo est trop lourde (max 50Mo)");
+        continue;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        if (data.url) newVideos.push(data.url);
+      } catch (err) {
+        console.error("Video upload failed", err);
+      }
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      videos: [...prev.videos, ...newVideos]
     }));
     setIsUploading(false);
   };
@@ -234,7 +275,7 @@ export default function ProductForm({ initialData }: ProductFormProps) {
                         </>
                       )}
                     </div>
-                    <input type="file" className="hidden" accept="image/*" multiple onChange={handleFileChange} />
+                    <input type="file" className="hidden" accept="image/*" multiple onChange={handleImageUpload} />
                   </label>
                   <p className="text-[10px] text-gray-600 uppercase font-bold tracking-widest text-center">OU AJOUTER PAR URL</p>
                   <div className="flex gap-2">
@@ -280,14 +321,42 @@ export default function ProductForm({ initialData }: ProductFormProps) {
               </div>
             </div>
 
-             <div className="space-y-4 pt-4 border-t border-gray-800">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Video className="w-5 h-5 text-purple-400" />
-                Vidéos (URLs)
-              </h3>
-              <p className="text-sm text-gray-500">Ajoutez des liens vers des démos ou présentations.</p>
-              {/* Similar logic for videos if needed */}
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-4">
+                  <label className="block w-full cursor-pointer group">
+                    <div className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-800 rounded-3xl group-hover:border-purple-500/50 group-hover:bg-purple-500/5 transition-all">
+                      {isUploading ? (
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+                      ) : (
+                        <>
+                          <Video className="w-8 h-8 text-gray-500 group-hover:text-purple-400 mb-2" />
+                          <p className="text-sm text-gray-500 group-hover:text-purple-300">Uploader une vidéo (MP4, MKV)</p>
+                        </>
+                      )}
+                    </div>
+                    <input type="file" className="hidden" accept="video/*" multiple onChange={handleVideoUpload} />
+                  </label>
+                </div>
+
+                <div className="bg-gray-950/50 border border-gray-800 rounded-3xl p-4 min-h-[130px]">
+                  <p className="text-xs font-bold text-gray-500 mb-4 uppercase tracking-widest">
+                    Vidéos ajoutées ({formData.videos.length})
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {formData.videos.map((url: string, i: number) => (
+                      <div key={i} className="relative group aspect-video rounded-xl overflow-hidden border border-gray-800 bg-gray-950 flex items-center justify-center">
+                        <Video className="w-8 h-8 text-purple-500/50" />
+                        <button
+                          onClick={() => removeItem("videos", i)}
+                          className="absolute inset-0 flex items-center justify-center bg-red-500/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
           </div>
         )}
 

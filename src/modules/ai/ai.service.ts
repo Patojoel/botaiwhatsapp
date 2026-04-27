@@ -12,14 +12,10 @@ export class AIService {
     this.provider = provider;
   }
 
-  /**
-   * Génère une réponse IA basée sur le contexte de l'instance et du catalogue.
-   * Note : La vision (images) est désactivée pour le moment pour privilégier la stabilité du texte.
-   */
   async generateResponse(
     botInstanceId: string,
     messages: { role: "user" | "assistant"; content: string | any[] }[] = [],
-    _imageUrl?: string, // Préfixé par _ car inutilisé pour la stabilité actuelle
+    _imageUrl?: string,
     fallbackPrompt: string = "Tu es un assistant commercial intelligent.",
     enrichedContext?: {
       prompt: string;
@@ -32,29 +28,33 @@ export class AIService {
     
     let systemPrompt = "";
 
-    // 1. Construction du prompt contextuel
     if (enrichedContext) {
       const rulesStr = enrichedContext.rules.map((r, i) => `${i + 1}. ${r}`).join("\n");
       const restrictionStr = enrichedContext.restrictToProducts 
-        ? "\n⚠️ RESTRICTION : Réponds UNIQUEMENT sur les produits du catalogue ci-dessous." 
+        ? "\n⚠️ RESTRICTION : Réponds UNIQUEMENT sur les produits du catalogue." 
         : "";
 
       systemPrompt = `
 ### TON RÔLE
+Tu es un expert en vente directe sur WhatsApp. Ton style est humain, rapide et percutant.
 ${enrichedContext.prompt}
 
-### RÈGLES DE CONDUITE
-${rulesStr}
-${restrictionStr}
-
-### CATALOGUE PRODUITS
-Voici tes produits. Utilise EXCLUSIVEMENT ces détails pour répondre :
+### CATALOGUE PRODUITS & MÉDIAS
 ${enrichedContext.productsInfo}
 
-### INSTRUCTIONS DE RÉPONSE
-- Sois chaleureux, humain et très concis.
-- **PHOTO (OBLIGATOIRE) :** Dès que tu mentionnes un produit ou que le client pose une question dessus, tu DOIS impérativement ajouter la balise '[IMAGE:ID_DU_PRODUIT]' à la fin de ton message. Ne l'oublie jamais, c'est crucial pour la vente. L'ID est celui entre parenthèses.
-- Si le client envoie une image, explique que tu peux l'aider par texte uniquement pour le moment.
+### RÈGLES D'OR (À RESPECTER DANS CET ORDRE)
+
+1. **CONCISION ABSOLUE :** Maximum 1 ou 2 phrases par message. Pas de politesse inutile.
+2. **DÉCLENCHEMENT MÉDIA :** N'envoie une photo ou une vidéo QUE si le client le demande explicitement (ex: "montre moi", "photo", "vidéo", "je veux voir"). Ne les envoie JAMAIS automatiquement.
+3. **PAS DE COMMENTAIRE :** Quand tu mets une balise [IMAGE...] ou [VIDEO...], ne fais aucune introduction (pas de "Voici la photo"). Mets juste la balise à la fin de ton texte.
+4. **SYNTAXE :** Utilise '[IMAGE:REAL_ID:INDEX]' ou '[VIDEO:REAL_ID:1]'. Remplace REAL_ID par l'identifiant technique (ex: cmog7...).
+5. **SUIVI DES INDEX :** Si le client demande "une autre photo", utilise l'index suivant (:2, :3...). Ne renvoie jamais deux fois la même.
+6. **OBJECTIF :** Ton but est de conclure la vente le plus vite possible.
+7. **VOCAUX :** Si le message commence par "(Vocal) : ", c'est que le client t'a parlé. Sois particulièrement chaleureux et proactif.
+
+### RÈGLES MÉTIER
+${rulesStr}
+${restrictionStr}
 `;
     } else {
       const inst = await prisma.botInstance.findUnique({ 
@@ -64,27 +64,35 @@ ${enrichedContext.productsInfo}
       systemPrompt = inst?.systemPrompt || fallbackPrompt;
     }
 
-    // 2. Préparation des messages pour l'IA (On ne garde QUE le texte pour éviter les erreurs 400)
+    // 2. Préparation des messages
+    const history: AIMessage[] = messages.map(m => {
+      let textContent = "";
+      if (typeof m.content === "string") {
+        textContent = m.content;
+      } else if (Array.isArray(m.content)) {
+        textContent = m.content
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => c.text)
+          .join("\n");
+      }
+      return { role: m.role, content: textContent || "" };
+    });
+
     const formatted: AIMessage[] = [
       { role: "system", content: systemPrompt },
-      ...messages.map(m => {
-        let textContent = "";
-        if (typeof m.content === "string") {
-          textContent = m.content;
-        } else if (Array.isArray(m.content)) {
-          // Si c'est un tableau (format multimodal), on extrait uniquement les blocs de texte
-          textContent = m.content
-            .filter((c: any) => c.type === "text")
-            .map((c: any) => c.text)
-            .join("\n");
-        }
-        return { role: m.role, content: textContent || "" };
-      })
+      ...history
     ];
 
-    // Sécurité : au moins un message utilisateur
-    if (formatted.length === 1) {
-       formatted.push({ role: "user", content: "Bonjour" });
+    // Rappel final pour "forcer" la concision et le déclenchement média
+    if (history.length > 0) {
+      formatted.push({ 
+        role: "system", 
+        content: "RAPPEL : 1-2 phrases max. N'envoie de média QUE si on te le demande." 
+      });
+    }
+
+    if (formatted.length === 1 || (formatted.length > 0 && formatted[formatted.length-1].role === "assistant")) {
+       formatted.push({ role: "user", content: "Continue." });
     }
 
     try {
@@ -97,9 +105,6 @@ ${enrichedContext.productsInfo}
   }
 }
 
-/**
- * Factory pour récupérer le provider configuré dans les variables d'environnement.
- */
 function getActiveProvider(): IAIProvider {
   const providerName = (process.env.AI_PROVIDER || "openrouter").toLowerCase();
   if (providerName === "groq") return new GroqProvider();

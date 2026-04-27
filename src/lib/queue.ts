@@ -31,8 +31,10 @@ export const broadcastQueue = new Queue("whatsapp-broadcasts", {
   connection,
 });
 
+export const aiQueue = new Queue("ai-processing", { connection });
+export const videoQueue = new Queue("video-rendering", { connection });
+
 export { messageQueue };
-export const aiQueue = messageQueue; // Alias pour la compatibilité interne
 
 export async function addAIJob(data: any) {
   return messageQueue.add("processAI", data);
@@ -239,6 +241,67 @@ if (!(global as any).aiWorker) {
 
     (global as any).broadcastWorker = broadcastWorker;
 
+    // --- NOUVEAU : Worker pour le rendu vidéo ---
+    const { VideoService } = require("../modules/video/video.service");
+    const { VoiceService } = require("../modules/ai/voice.service");
+    const { aiService } = require("../modules/ai/ai.service");
+
+    const videoWorker = new Worker("video-rendering", async (job: Job) => {
+        const { productId, format, botInstanceId, videoPromoId } = job.data;
+        
+        try {
+            logger.info(`[Queue] Début fabrication vidéo pour produit ${productId}`);
+            
+            // 1. Récupérer les infos du produit
+            const product = await prisma.product.findUnique({
+                where: { id: productId }
+            });
+            if (!product) throw new Error("Produit non trouvé");
+
+            // 2. Générer le script via IA
+            let script = "";
+            try {
+              script = await aiService.generateResponse(botInstanceId, [
+                  { role: "user", content: `Écris un script de vente ultra-court (max 150 caractères) pour ce produit: ${product.name}. Description: ${product.description}. Le script doit être percutant pour un statut WhatsApp.` }
+              ]);
+            } catch (err) {
+              logger.warn("[Queue] Échec script IA, utilisation du script de secours.");
+              script = `Découvrez ${product.name}, une solution exceptionnelle pour vous ! Contactez-nous pour commander.`;
+            }
+
+            // 3. Générer l'audio
+            const audioPath = await VoiceService.generateAudio(script);
+
+            // 4. Générer la vidéo
+            const videoUrl = await VideoService.createPromoVideo(
+                product.images,
+                audioPath,
+                format
+            );
+
+            // 5. Mettre à jour la DB
+            await (prisma as any).productVideo.update({
+                where: { id: videoPromoId },
+                data: {
+                    videoUrl,
+                    script,
+                    status: "READY"
+                }
+            });
+
+            logger.info(`[Queue] Vidéo promotionnelle prête: ${videoUrl}`);
+
+        } catch (error: any) {
+            logger.error(`[Queue] Erreur rendu vidéo: ${error.message}`);
+            await (prisma as any).productVideo.update({
+                where: { id: videoPromoId },
+                data: { status: "FAILED" }
+            });
+        }
+    }, { connection, concurrency: 1 });
+
+    (global as any).videoWorker = videoWorker;
+
     (global as any).aiWorker = new Worker(
         "ai-processing",
         async (job: Job) => {
@@ -273,13 +336,17 @@ if (!(global as any).aiWorker) {
 
                         if (p.products && p.products.length > 0) {
                             logger.info(`[Queue] Found ${p.products.length} products for context.`);
-                            productsInfo = "\n\n### CATALOGUE PRODUITS (IMPORTANT: utilise [IMAGE:ID] pour envoyer la photo d'un produit)\n" + p.products.map((prod: any) => 
-                                `- ${prod.name} (ID: ${prod.id}): ${prod.description} | Prix: ${prod.price} ${prod.currency} | Caractéristiques: ${prod.features.join(", ")}`
-                            ).join("\n");
+                            productsInfo = "\n\n### CATALOGUE PRODUITS (IMPORTANT: utilise [IMAGE:ID:INDEX] ou [VIDEO:ID:INDEX])\n" + p.products.map((prod: any) => {
+                                const imgCount = (prod.images as string[]).length;
+                                const vidCount = (prod.videos as string[]).length;
+                                return `- ${prod.name} (ID: ${prod.id}): ${prod.description} | Prix: ${prod.price} ${prod.currency} | Caractéristiques: ${prod.features.join(", ")} | Médias: ${imgCount} image(s), ${vidCount} vidéo(s) disponible(s)`;
+                            }).join("\n");
 
-                            // Récupérer la première image de chaque produit pour l'IA
+                            logger.info(`[Queue] Catalog info sent to AI: ${productsInfo}`);
+
+                            // Récupérer toutes les images de tous les produits pour le contexte (au cas où)
                             productImages = p.products
-                                .map((prod: any) => prod.images?.[0])
+                                .flatMap((prod: any) => prod.images || [])
                                 .filter((img: string) => !!img);
                         }
 
@@ -303,38 +370,81 @@ if (!(global as any).aiWorker) {
                     logger.info(`[Queue] AI Response: "${response}"`);
                     // Envoyer la réponse via WhatsApp (Texte)
                     let cleanResponse = response;
-                    const imageMatch = response.match(/\[IMAGE:\s*([\w-]+)\s*\]/);
                     
-                    if (imageMatch) {
-                        const productId = imageMatch[1];
-                        cleanResponse = response.replace(/\[IMAGE:\s*[\w-]+\s*\]/g, "").trim();
+                    // Détection Images (Support multiple et index)
+                    const imageMatches = Array.from(response.matchAll(/\[IMAGE:\s*([\w-]+)(?::(\d+))?\s*\]/g)) as RegExpMatchArray[];
+                    logger.info(`[Queue] Found ${imageMatches.length} IMAGE tags in response.`);
+
+                    for (const match of imageMatches) {
+                        const productId = match[1];
+                        const index = match[2] ? parseInt(match[2]) - 1 : 0;
+                        logger.info(`[Queue] Processing IMAGE tag: Product=${productId}, Index=${index}`);
                         
-                        // Récupérer l'image du produit
                         const product = await prisma.product.findUnique({ where: { id: productId } });
-                        const images = product?.images as any[];
+                        if (!product) {
+                            logger.error(`[Queue] Product ${productId} NOT FOUND in database!`);
+                            continue;
+                        }
+
+                        const images = product.images as string[];
+                        logger.info(`[Queue] Product ${product.name} has ${images.length} images. Attempting to send index ${index}`);
                         
-                        if (product && Array.isArray(images) && images.length > 0) {
-                            const imageToSend = images[0];
-                            if (imageToSend) {
-                                logger.info(`[Queue] AI requested image for product ${productId}. Sending...`);
-                                
-                                // Envoi de l'image
-                                await WhatsAppService.sendDirectMessage(
-                                    botInstanceId,
-                                    remoteJid,
-                                    `Voici la photo de : ${product.name}`,
-                                    imageToSend,
-                                    "image"
-                                );
-                            }
+                        if (Array.isArray(images) && images[index]) {
+                            logger.info(`[Queue] Sending image index ${index} for ${product.name}...`);
+                            await WhatsAppService.sendDirectMessage(
+                                botInstanceId,
+                                remoteJid,
+                                "", // Aucun commentaire
+                                images[index],
+                                "image"
+                            );
+                        } else {
+                            logger.warn(`[Queue] Image at index ${index} NOT AVAILABLE for product ${product.name}.`);
                         }
                     }
 
-                    // Envoyer le texte final
-                    await WhatsAppService.sendTextMessage(botInstanceId, remoteJid, cleanResponse);
+                    // Détection Vidéos (Support multiple et index)
+                    const videoMatches = Array.from(response.matchAll(/\[VIDEO:\s*([\w-]+)(?::(\d+))?\s*\]/g)) as RegExpMatchArray[];
+                    logger.info(`[Queue] Found ${videoMatches.length} VIDEO tags in response.`);
+
+                    for (const match of videoMatches) {
+                        const productId = match[1];
+                        const index = match[2] ? parseInt(match[2]) - 1 : 0;
+                        logger.info(`[Queue] Processing VIDEO tag: Product=${productId}, Index=${index}`);
+                        
+                        const product = await prisma.product.findUnique({ where: { id: productId } });
+                        if (!product) {
+                            logger.error(`[Queue] Product ${productId} NOT FOUND in database!`);
+                            continue;
+                        }
+
+                        const videos = product.videos as string[];
+                        logger.info(`[Queue] Product ${product.name} has ${videos.length} videos. Attempting to send index ${index}`);
+                        
+                        if (Array.isArray(videos) && videos[index]) {
+                            logger.info(`[Queue] Sending video index ${index} for ${product.name}...`);
+                            await WhatsAppService.sendDirectMessage(
+                                botInstanceId,
+                                remoteJid,
+                                "", // Aucun commentaire
+                                videos[index],
+                                "video"
+                            );
+                        } else {
+                            logger.warn(`[Queue] Video at index ${index} NOT AVAILABLE for product ${product.name}.`);
+                        }
+                    }
+
+                    // Nettoyer toutes les balises du texte final
+                    cleanResponse = response.replace(/\[(IMAGE|VIDEO):\s*[\w-]+(?::\d+)?\s*\]/g, "").trim();
+
+                    // Envoyer le texte final s'il n'est pas vide
+                    if (cleanResponse) {
+                        await WhatsAppService.sendTextMessage(botInstanceId, remoteJid, cleanResponse);
+                    }
 
                     // Sauvegarder la réponse de l'assistant
-                    await (ConversationRepository as any).saveMessage(botInstanceId, contactId, "assistant", cleanResponse);
+                    await (ConversationRepository as any).saveMessage(botInstanceId, contactId, "assistant", cleanResponse || "Envoi de médias...");
 
                     return { response };
                 } catch (error) {
@@ -423,6 +533,34 @@ if (!(global as any).aiWorker) {
                     logger.error(`[Queue] Erreur job ${campaignId}: ${error}`);
                     throw error;
                 }
+            } else if (job.name === "publish-scheduled-video") {
+                try {
+                    const videosToPublish = await (prisma as any).productVideo.findMany({
+                        where: {
+                            status: "READY",
+                            isPublished: false,
+                            scheduledAt: { lte: new Date() }
+                        }
+                    });
+
+                    for (const video of videosToPublish) {
+                        logger.info(`[Queue] Publication auto en statut: ${video.videoUrl}`);
+                        
+                        await WhatsAppService.sendStatusUpdate(
+                            video.botInstanceId,
+                            video.script || "Nouveauté !",
+                            video.videoUrl,
+                            "video"
+                        );
+
+                        await (prisma as any).productVideo.update({
+                            where: { id: video.id },
+                            data: { isPublished: true }
+                        });
+                    }
+                } catch (err) {
+                    logger.error(`[Queue] Erreur publication auto vidéo: ${err}`);
+                }
             }
         },
         { connection, concurrency: 5 }
@@ -458,6 +596,14 @@ export const initWorker = async () => {
                 await updateBroadcastJob(b.id, b.cronPattern, b.isActive, b.scheduleConfig);
             }
         }
+
+        // Ajouter le job de surveillance des vidéos (toutes les minutes)
+        await messageQueue.add("publish-scheduled-video", {}, {
+            repeat: { pattern: "* * * * *" },
+            jobId: "publish-videos-scheduler",
+            removeOnComplete: true
+        });
+        
     } catch (err) {
         logger.error(`[Init] Erreur initialisation planning: ${err}`);
     }

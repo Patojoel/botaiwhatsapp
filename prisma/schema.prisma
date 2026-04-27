@@ -93,6 +93,7 @@ model BotInstance {
   statusCampaigns  StatusCampaign[]
   statusLogs       StatusLog[]
   broadcasts       BroadcastCampaign[]
+  productVideos    ProductVideo[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -120,6 +121,7 @@ model Product {
 
   // Liaisons
   prompts SystemPrompt[] @relation("ProductPrompts")
+  videos_promo ProductVideo[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -280,4 +282,25 @@ model BroadcastLog {
 enum Role {
   user
   assistant
+}
+
+model ProductVideo {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  videoUrl  String?  @db.Text
+  script    String?  @db.Text
+  status    String   @default("PENDING") // PENDING, PROCESSING, READY, FAILED
+  format    String   @default("9:16")    // 9:16 (Portrait), 16:9 (Landscape), 1:1 (Square)
+  
+  // Planification
+  scheduledAt DateTime?
+  isPublished Boolean @default(false)
+  
+  botInstanceId String
+  botInstance   BotInstance @relation(fields: [botInstanceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

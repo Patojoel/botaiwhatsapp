@@ -1,13 +1,14 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadContentFromMessage
 } from "@whiskeysockets/baileys";
 import { usePrismaAuthState } from "./prisma-auth";
 import { Boom } from "@hapi/boom";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { ConversationRepository } from "../conversation/conversation.repository";
-import { aiService } from "../ai/ai.service";
+import { AudioService } from "../ai/audio.service";
 import pino from "pino";
 import path from "path";
 import fs from "fs/promises";
@@ -155,8 +156,27 @@ export class WhatsAppService {
         const senderPhone =
           msg.key.remoteJid?.replace("@s.whatsapp.net", "") || "";
         const pushName = msg.pushName || undefined;
-        const content =
-          msg.message.conversation || msg.message.extendedTextMessage?.text;
+        
+        let content = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        
+        // --- NOUVEAU : Gestion des messages audio ---
+        if (!content && msg.message.audioMessage) {
+          try {
+            logger.info(`[WhatsApp] Téléchargement d'un vocal de ${senderPhone}...`);
+            const stream = await downloadContentFromMessage(msg.message.audioMessage, 'audio');
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+              buffer = Buffer.concat([buffer, chunk]);
+            }
+            
+            // Transcription via Groq
+            const transcription = await AudioService.transcribe(buffer);
+            content = `(Vocal) : ${transcription}`;
+            logger.info(`[WhatsApp] Transcription réussie et préparée: "${content}"`);
+          } catch (audioErr) {
+            logger.error({ audioErr }, "[WhatsApp] Échec de la transcription audio");
+          }
+        }
 
         if (!content) return;
 
@@ -173,6 +193,8 @@ export class WhatsAppService {
             content,
           );
 
+          logger.info(`[WhatsApp] Message mis en file d'attente pour l'IA. Contenu: "${content.substring(0, 50)}..."`);
+          
           // Phase 3 : Déléguer à BullMQ pour le traitement asynchrone (IA + réponse)
           await messageQueue.add("processAI", {
             botInstanceId,

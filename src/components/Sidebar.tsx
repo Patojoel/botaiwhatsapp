@@ -12,7 +12,8 @@ import {
   Megaphone,
   Package,
   BrainCircuit,
-  Bot
+  Bot,
+  Video
 } from 'lucide-react';
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,7 @@ import { usePathname } from "next/navigation";
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
   { icon: Package, label: "Catalogue Produits", href: "/dashboard/products" },
+  { icon: Video, label: "Vidéos Promo", href: "/dashboard/video-promos" },
   { icon: BrainCircuit, label: "Prompts IA", href: "/dashboard/prompts" },
   { icon: MessageSquare, label: "Conversations", href: "/dashboard/chat" },
   { icon: Zap, label: "Automatisations", href: "/dashboard/automations" },
